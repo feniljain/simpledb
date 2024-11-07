@@ -6,9 +6,9 @@ const fs = std.fs;
 const print = std.debug.print;
 const StringHashMap = std.hash_map.StringHashMap;
 
-const string = []const u8;
+pub const string = []const u8;
 
-const OFFSET_BYTE_SIZE = 8;
+pub const OFFSET_BYTE_SIZE = 8;
 
 inline fn construct_path(alloc: mem.Allocator, db_dir_path: string, file_name: string) !string {
     const concat_arr = [3]string{ db_dir_path, "/", file_name };
@@ -28,7 +28,7 @@ pub const BlockID = struct {
         };
     }
 
-    pub fn equals(block_id_left: BlockID, block_id_right: BlockID) bool {
+    pub fn equals(block_id_left: *BlockID, block_id_right: *BlockID) bool {
         return ((block_id_left.file_name == block_id_right.file_name) and
             (block_id_left.idx == block_id_right.idx));
     }
@@ -56,9 +56,9 @@ pub const Page = struct {
     //                     v actual array
     // 0b00 0b00 0b00 0b10 0b00 0b01
     //                  ^ length 2
-    pub fn get_int(self: *Page, offset: u64) i64 {
+    pub fn get_int(self: *Page, offset: u64) u64 {
         return mem.readInt(
-            i64,
+            u64,
             mem.sliceAsBytes(self.buf[offset + OFFSET_BYTE_SIZE .. offset + OFFSET_BYTE_SIZE + 8])[0..8],
             .big,
         );
@@ -85,15 +85,15 @@ pub const Page = struct {
 
     // OPTIMIZATION: instead of using static 8 bytes for each size integer, think of packing integers, apply
     // the same for size storage in `set_bytes`
-    pub fn set_int(self: *Page, offset: u64, value: i64) u64 {
+    pub fn set_int(self: *Page, offset: u64, value: u64) u64 {
         mem.writeInt(u64, mem.sliceAsBytes(self.buf[offset .. offset + OFFSET_BYTE_SIZE])[0..8], 8, .big);
-        mem.writeInt(i64, mem.sliceAsBytes(self.buf[offset + OFFSET_BYTE_SIZE .. offset + OFFSET_BYTE_SIZE + 8])[0..8], value, .big);
+        mem.writeInt(u64, mem.sliceAsBytes(self.buf[offset + OFFSET_BYTE_SIZE .. offset + OFFSET_BYTE_SIZE + 8])[0..8], value, .big);
         return offset + OFFSET_BYTE_SIZE + 8;
     }
 
-    pub fn set_bytes(self: *Page, offset: u64, bytes: []const u8) u64 {
+    pub fn set_bytes(self: *Page, offset: u64, bytes: *const []const u8) u64 {
         mem.writeInt(u64, mem.sliceAsBytes(self.buf[offset .. offset + OFFSET_BYTE_SIZE])[0..8], bytes.len, .big);
-        mem.copyForwards(u8, self.buf[offset + OFFSET_BYTE_SIZE .. offset + OFFSET_BYTE_SIZE + bytes.len], bytes);
+        mem.copyForwards(u8, self.buf[offset + OFFSET_BYTE_SIZE .. offset + OFFSET_BYTE_SIZE + bytes.len], bytes.*);
 
         return offset + OFFSET_BYTE_SIZE + bytes.len;
     }
@@ -103,7 +103,7 @@ pub const Page = struct {
     }
 };
 
-const FileMgr = struct {
+pub const FileMgr = struct {
     db_dir: fs.Dir,
     block_size: u64,
     allocator: mem.Allocator,
@@ -189,9 +189,26 @@ const FileMgr = struct {
 
     pub fn length(self: *FileMgr, file_name: string) !u64 {
         const file = try self.get_file(file_name);
-        try file.seekTo(0);
         const file_size = (try file.stat()).size;
         return file_size / self.block_size;
+    }
+
+    pub fn append(self: *FileMgr, file_name: string) !BlockID {
+        const file = try self.get_file(file_name);
+        const file_size = (try file.stat()).size;
+
+        const new_blk_idx = (file_size / self.block_size) + 1;
+        print("max block num in file: {} \n new block num: {}\n", .{ (file_size / self.block_size), (file_size / self.block_size) + 1 }); // TODO: remove this log after verifying
+
+        const block = BlockID.new(file_name, new_blk_idx);
+
+        const block_buf: []u8 = try self.allocator.alloc(u8, self.block_size);
+        defer self.allocator.free(block_buf);
+
+        try file.seekTo(new_blk_idx * self.block_size);
+        _ = try file.write(block_buf);
+
+        return block;
     }
 
     pub fn free(self: *FileMgr) void {
@@ -206,59 +223,32 @@ const FileMgr = struct {
     }
 };
 
-pub const SimpleDB = struct {
-    file_mgr: FileMgr,
-    allocator: mem.Allocator,
-
-    pub fn new(
-        allocator: mem.Allocator,
-        db_dir_path: string,
-        block_size: u64,
-        buffer_size: u64,
-    ) !SimpleDB {
-        _ = buffer_size;
-
-        const file_mgr = try FileMgr.new(allocator, db_dir_path, block_size);
-
-        return SimpleDB{
-            .file_mgr = file_mgr,
-            .allocator = allocator,
-        };
-    }
-
-    pub fn free(self: *SimpleDB) void {
-        self.file_mgr.free();
-    }
-};
-
 test "basic block + file + page read/write" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    var allocator = gpa.allocator();
 
     defer {
         _ = gpa.deinit();
     }
 
-    var db = try SimpleDB.new(allocator, "/Users/feniljain/test-dir", 400, 0);
-    defer db.free();
+    var file_mgr = try FileMgr.new(allocator, "/Users/feniljain/test-dir", 400);
+    defer file_mgr.free();
 
     var blk = BlockID.new("testfile", 0);
-
-    var file_mgr = &db.file_mgr;
 
     var p1 = try Page.from_blocksize(allocator, file_mgr.block_size);
     defer p1.free();
 
-    const val = "abcdefghijklm";
+    var val: []const u8 = "abcdefghijklm";
     const pos1 = 0;
 
-    var next_offset = p1.set_bytes(0, val);
+    var next_offset = p1.set_bytes(0, &val);
 
     const pos2 = next_offset;
-    const i: i64 = 1234;
+    const i: u64 = 1234;
 
     next_offset = p1.set_int(next_offset, i);
- 
+
     try file_mgr.write(&blk, &p1);
 
     var p2 = try Page.from_blocksize(allocator, file_mgr.block_size);
@@ -273,9 +263,15 @@ test "basic block + file + page read/write" {
     print("offset {any} contains {s}\n", .{ pos1, buf });
     print("offset {any} contains {any}\n", .{ pos2, p2.get_int(pos2) });
 
-    const argv = [_][]const u8{"rm","-rf","/Users/feniljain/test-dir",};
+    const argv = [_][]const u8{
+        "rm",
+        "-rf",
+        "/Users/feniljain/test-dir",
+    };
     _ = try std.process.Child.run(.{
         .allocator = allocator,
         .argv = &argv,
     });
+
+    print("[PASS] storage test\n", .{});
 }

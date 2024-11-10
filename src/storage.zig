@@ -66,7 +66,7 @@ pub const Page = struct {
 
     // TODO: Should caller pass a buffer to write to, or Should
     // this method allocate?
-    pub fn get_bytes(self: *Page, offset: u64) ![]u8 {
+    pub fn get_bytes(self: *Page, offset: u64) ![]const u8 {
         const data_len = mem.readInt(
             u64,
             mem.sliceAsBytes(self.buf[offset .. offset + OFFSET_BYTE_SIZE])[0..8],
@@ -231,7 +231,7 @@ test "basic block + file + page read/write" {
         _ = gpa.deinit();
     }
 
-    var file_mgr = try FileMgr.new(allocator, "/Users/feniljain/test-dir", 400);
+    var file_mgr = try FileMgr.new(allocator, "/Users/feniljain/test-dir-1", 400);
     defer file_mgr.free();
 
     var blk = BlockID.new("testfile", 0);
@@ -266,7 +266,7 @@ test "basic block + file + page read/write" {
     const argv = [_][]const u8{
         "rm",
         "-rf",
-        "/Users/feniljain/test-dir",
+        "/Users/feniljain/test-dir-1",
     };
     _ = try std.process.Child.run(.{
         .allocator = allocator,

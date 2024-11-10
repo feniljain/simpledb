@@ -22,7 +22,6 @@ pub const LogMgr = struct {
     // - First 4 bytes (an integer's space) is reserved to store what offset from back
     //  to write from next. This starts from page_size (== block_size) and keeps
     //  decrementing from there till no space is left to store new log records
-
     log_page: Page,
 
     pub fn new(allocator: mem.Allocator, file_mgr: *FileMgr, log_file_name: string) !LogMgr {
@@ -54,9 +53,26 @@ pub const LogMgr = struct {
     }
 
     // pub fn flush(lsn: u64) void {}
-    // iterator??
+
+    pub fn iterator(self: *LogMgr) !LogsIterator {
+        return LogsIterator.init(self.allocator, self.log_file_name, self.file_mgr);
+    }
 
     pub fn append(self: *LogMgr, log_rec: []const u8) !u64 {
+
+        // how much space is left in block?
+        //
+        // enough ->
+        // - just push buf to log page
+        // - increment lsn
+        //
+        // not enough ->
+        // - flush current block
+        // - append a new block
+        // - set curr_blk to new_blk
+        // - just push buf to log page
+        // - increment lsn
+
         var offset_to_write_from = self.log_page.get_int(0);
         // extra OFFSET_BYTE_SIZE is for the integer we store in the start
         // of log page
@@ -79,19 +95,6 @@ pub const LogMgr = struct {
         _ = self.log_page.set_int(0, offset_to_write_from - byts_needed);
         self.latest_lsn += 1;
 
-        // how much space is left in block?
-        //
-        // enough ->
-        // - just push buf to log page
-        // - increment lsn
-        //
-        // not enough ->
-        // - flush current block
-        // - append a new block
-        // - set curr_blk to new_blk
-        // - just push buf to log page
-        // - increment lsn
-
         return self.latest_lsn;
     }
 
@@ -109,5 +112,77 @@ pub const LogMgr = struct {
 
     pub fn free(self: *LogMgr) void {
         self.log_page.free();
+    }
+};
+
+pub const LogsIterator = struct {
+    log_file_name: string,
+    blk: BlockID,
+    next_offset: u64,
+    n_blk: u64,
+    read_page: Page,
+    file_mgr: *FileMgr,
+
+    pub fn init(allocator: mem.Allocator, log_file_name: string, file_mgr: *FileMgr) !LogsIterator {
+        const n_blk = try file_mgr.length(log_file_name) - 1;
+        var page = try Page.from_blocksize(allocator, file_mgr.block_size);
+        var blk = BlockID.new(log_file_name, 0);
+
+        try file_mgr.read(&blk, &page);
+        const next_offset = page.get_int(0);
+
+        return LogsIterator{
+            .log_file_name = log_file_name,
+            .blk = blk,
+            .next_offset = next_offset,
+            .n_blk = n_blk,
+            .read_page = page,
+            .file_mgr = file_mgr,
+        };
+
+        // find number of blocks in it
+        // store which block are we currently on
+        // read from that block into a local page
+    }
+
+    pub fn next(self: *LogsIterator) !?[]const u8 {
+        // free page at the end of iterator cycle
+
+        // did we reach end of blocks and page both?
+        // yes -> free page, return null
+        //
+        // no ->
+        // did we reach end of page?
+        // yes->
+        // - switch to next block
+        // - read page from block
+        // - set next_offset
+        // - get_bytes()
+        // - set next_offset
+        //
+        // no ->
+        // - get_bytes()
+        // - set next_offset
+
+        const end_of_page = self.next_offset >= self.file_mgr.block_size;
+        if (self.blk.idx == self.n_blk and end_of_page) {
+            self.read_page.free();
+            return null;
+        }
+
+        if (end_of_page) {
+            self.blk = BlockID.new(self.log_file_name, self.blk.idx + 1);
+            try self.file_mgr.read(&self.blk, &self.read_page);
+            self.next_offset = self.read_page.get_int(0);
+            if(self.next_offset == self.file_mgr.block_size and self.blk.idx == self.n_blk) {
+                self.read_page.free();
+                return null;
+            }
+        }
+
+        const buf = try self.read_page.get_bytes(self.next_offset);
+        self.next_offset += buf.len + OFFSET_BYTE_SIZE; // TODO: double check
+
+        return buf;
     }
 };

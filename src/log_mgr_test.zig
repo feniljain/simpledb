@@ -36,12 +36,22 @@ const LogMgrTest = struct {
             _ = page.set_bytes(0, &log_str);
             _ = page.set_int(log_str.len, 100 + idx);
 
-            const lsn = try self.log_mgr.append(buf);
+            _ = try self.log_mgr.append(buf);
 
-            print("Completed writing LSN: {}\n", .{lsn});
+            // print("Completed writing LSN: {}\n", .{lsn});
         }
 
-        print("\n", .{});
+        print("Wrote all records\n", .{});
+    }
+
+    pub fn print_log_records(self: *LogMgrTest) !void {
+        // _ = self;
+        var itr = try self.log_mgr.iterator();
+        while (try itr.next()) |rec| {
+            // _ = rec;
+            print("rec: {any}\n", .{rec});
+            self.allocator.free(rec);
+        }
     }
 };
 
@@ -51,11 +61,13 @@ test "log mgr" {
 
     defer {
         _ = gpa.deinit();
+        delete_test_dir(allocator);
     }
+
 
     const blk_size = 400;
 
-    var file_mgr = try FileMgr.new(allocator, "/Users/feniljain/test-dir", blk_size);
+    var file_mgr = try FileMgr.new(allocator, "/Users/feniljain/test-dir-2", blk_size);
     defer file_mgr.free();
 
     var log_mgr = try LogMgr.new(allocator, &file_mgr, "test-log-file");
@@ -69,21 +81,28 @@ test "log mgr" {
     };
 
     try log_mgr_test.create_records(1, 35);
+    try log_mgr_test.print_log_records();
 
     // print_log_records();
     // create_records();
     // log_mgr.flush();
     // print_log_records();
 
+    print("[PASS] log mgr test\n", .{});
+}
+
+fn delete_test_dir(allocator: mem.Allocator) void {
+    print("delete_test_dir::start\n", .{});
+
     const argv = [_][]const u8{
         "rm",
         "-rf",
-        "/Users/feniljain/test-dir",
+        "/Users/feniljain/test-dir-2",
     };
-    _ = try std.process.Child.run(.{
+    _ = std.process.Child.run(.{
         .allocator = allocator,
         .argv = &argv,
-    });
-
-    print("[PASS] log mgr test\n", .{});
+    }) catch |err| {
+        print("error while deleting dir: {any}", .{err});
+    };
 }

@@ -18,12 +18,14 @@ const BitCask = struct {
     // multiple readers are fine.
     pub fn open(dir_name: []const u8) !BitCask {
         _ = dir_name;
+
         return BitCask {};
     }
 
     pub fn get(self: *BitCask, key: []const u8) ![]const u8 {
         _ = self;
         _ = key;
+
         return "";
     }
 
@@ -58,3 +60,19 @@ const BitCask = struct {
         _ = self;
     }
 };
+
+
+test "test bitcask put/get" {
+    var bitcask = try BitCask.open("./data");
+
+    const key = "melody";
+    const value = "itni choclaty kyun hai";
+
+    try bitcask.put(key, value);
+
+    const received_value = try bitcask.get(key);
+    try expect(std.mem.eql(u8, value, received_value));
+}
+
+const std = @import("std");
+const expect = std.testing.expect;

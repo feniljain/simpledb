@@ -116,7 +116,7 @@ pub const BitCask = struct {
     }
 };
 
-test "test bitcask put/get" {
+test "test_bitcask_put_get" {
     var bitcask = try BitCask.open("./data");
 
     const key: string = "melody";
@@ -126,6 +126,28 @@ test "test bitcask put/get" {
 
     const received_value = try bitcask.get(key);
     try expect(std.mem.eql(u8, value, received_value));
+
+    try bitcask.close();
+}
+
+test "test_bitcask_multiple_put_get" {
+    var bitcask = try BitCask.open("./data");
+
+    const key_1: string = "melody";
+    const value_1: string = "itni choclaty kyun hai";
+
+    try bitcask.put(key_1, value_1);
+
+    const key_2: string = "AJR";
+    const value_2: string = "Turning out";
+
+    try bitcask.put(key_2, value_2);
+
+    const received_value_2 = try bitcask.get(key_2);
+    try expect(std.mem.eql(u8, value_2, received_value_2));
+
+    const received_value_1 = try bitcask.get(key_1);
+    try expect(std.mem.eql(u8, value_1, received_value_1));
 
     try bitcask.close();
 }

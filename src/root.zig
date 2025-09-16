@@ -59,17 +59,12 @@ pub const BitCask = struct {
         // TODO: mark truncate as false, and exclude as true
         var file = try self.dir.createFile(file_name, .{ .read = true, .truncate = true, .exclusive = false });
 
-        // const keyval: KeyValPair = .{ .key_len = @intCast(key.len), .value_len = @intCast(value.len), .key = key, .value = value };
-        // std.debug.print("pair: {any}", .{@sizeOf(keyval)});
-        // try file.writeAll(mem.asBytes(keyval));
-
         var keyvalbyts = try self.allocator.alloc(u8, 4 + 4 + key.len + value.len);
         mem.writeInt(u32, keyvalbyts[0..4], @intCast(key.len), Endian.big);
         mem.writeInt(i32, keyvalbyts[4..8], @intCast(value.len), Endian.big);
-        std.debug.print("{any}", .{@TypeOf(&keyvalbyts[8..(8 + key.len)])});
-        std.debug.print("{any}", .{@TypeOf(key)});
-        @memset(keyvalbyts[8..(8 + key.len)], std.mem.sliceAsBytes(key));
-        // @memset(keyvalbyts[(8 + key.len)..(8 + key.len + value.len)], value);
+
+        @memcpy(keyvalbyts[8..(8 + key.len)], key);
+        @memcpy(keyvalbyts[(8 + key.len)..(8 + key.len + value.len)], value);
 
         try file.writeAll(keyvalbyts);
     }

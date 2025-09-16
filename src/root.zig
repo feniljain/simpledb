@@ -46,17 +46,37 @@ pub const BitCask = struct {
     }
 
     pub fn get(self: *BitCask, key: []const u8) ![]u8 {
-        _ = self;
         _ = key;
 
-        return "";
+        const file_name = try std.fmt.allocPrint(self.allocator, "data-{d}", .{1});
+        defer self.allocator.free(file_name);
+
+        // TODO: change flags to appropriate values
+        var file = try self.dir.openFile(file_name, .{ .mode = fs.File.OpenMode.read_write, .lock = .none, .lock_nonblocking = false, .allow_ctty = false });
+
+        try file.seekTo(0);
+
+        const key_len_byts = (try self.allocator.alloc(u8, 4))[0..4];
+        _ = try file.read(key_len_byts);
+        const key_len = mem.readInt(u32, key_len_byts, Endian.big);
+
+        const value_len_byts = (try self.allocator.alloc(u8, 4))[0..4];
+        _ = try file.read(value_len_byts);
+        const value_len = mem.readInt(u32, value_len_byts, Endian.big);
+
+        try file.seekBy(key_len);
+
+        const value = try self.allocator.alloc(u8, value_len);
+        _ = try file.read(value);
+
+        return value;
     }
 
     pub fn put(self: BitCask, key: []const u8, value: []const u8) !void {
         const file_name = try std.fmt.allocPrint(self.allocator, "data-{d}", .{1});
         defer self.allocator.free(file_name);
 
-        // TODO: mark truncate as false, and exclude as true
+        // TODO: mark truncate as false, and exclusive as true
         var file = try self.dir.createFile(file_name, .{ .read = true, .truncate = true, .exclusive = false });
 
         var keyvalbyts = try self.allocator.alloc(u8, 4 + 4 + key.len + value.len);

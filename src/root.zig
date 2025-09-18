@@ -15,8 +15,8 @@ const OpenOptions = struct {
 // KeyValPair::key_len:u32, value_len: u32, key: []const u8, value: []const u8
 
 pub const KeyDirValue = struct {
-    value_len: u32,
-    value_offset: u32,
+    value_len: u64,
+    value_offset: u64,
 };
 
 // Simpler version of BitCask:
@@ -24,55 +24,47 @@ pub const KeyDirValue = struct {
 // - No multiple data files
 pub const BitCask = struct {
     file: fs.File,
-    allocator: mem.Allocator,
-    keydir: *HashMap(KeyDirValue),
+    allocator: mem.Allocator = smp_allocator,
+    keydir: HashMap(KeyDirValue) = HashMap(KeyDirValue).init(smp_allocator),
 
     pub fn open(dir_name: []const u8) !BitCask {
         // var gpa = heap.GeneralPurposeAllocator(.{}).init;
         // const allocator = gpa.allocator();
 
         // const allocator = std.testing.allocator;
-        const allocator = std.heap.smp_allocator;
 
         var dir = try fs.cwd().openDir(dir_name, .{ .access_sub_paths = true, .iterate = true, .no_follow = false });
         defer dir.close();
 
-        const file_name = try std.fmt.allocPrint(allocator, "data-{d}", .{1});
-        defer allocator.free(file_name);
+        const file_name = try std.fmt.allocPrint(smp_allocator, "data-{d}", .{1});
+        defer smp_allocator.free(file_name);
 
         // TODO: mark truncate as false, and exclusive as true, how to make
         // file access as exclusive?
         const file = try dir.createFile(file_name, .{ .read = true, .truncate = true, .exclusive = false });
 
-        var keydir = HashMap(KeyDirValue).init(allocator);
+        try file.seekFromEnd(0);
 
-        return BitCask{ .file = file, .allocator = allocator, .keydir = &keydir };
+        return BitCask{ .file = file };
     }
 
     pub fn get(self: *BitCask, key: []const u8) ![]u8 {
-        _ = key;
+        const keydirval = self.keydir.get(key) orelse unreachable;
 
-        try self.file.seekTo(0);
+        try self.file.seekTo(keydirval.value_offset);
 
-        const key_len_byts = (try self.allocator.alloc(u8, 4))[0..4];
-        _ = try self.file.read(key_len_byts);
-        const key_len = mem.readInt(u32, key_len_byts, Endian.big);
-
-        const value_len_byts = (try self.allocator.alloc(u8, 4))[0..4];
-        _ = try self.file.read(value_len_byts);
-        const value_len = mem.readInt(u32, value_len_byts, Endian.big);
-
-        try self.file.seekBy(key_len);
-
-        const value = try self.allocator.alloc(u8, value_len);
+        const value = try self.allocator.alloc(u8, keydirval.value_len);
         _ = try self.file.read(value);
 
         return value;
     }
 
-    pub fn put(self: BitCask, key: []const u8, value: []const u8) !void {
+    pub fn put(self: *BitCask, key: []const u8, value: []const u8) !void {
+        try self.file.seekFromEnd(0);
+
         var keyvalbyts = try self.allocator.alloc(u8, 4 + 4 + key.len + value.len);
 
+        const key_len: u64 = @intCast(key.len);
         const value_len: u32 = @intCast(value.len);
         mem.writeInt(u32, keyvalbyts[0..4], @intCast(key.len), Endian.big);
         mem.writeInt(u32, keyvalbyts[4..8], value_len, Endian.big);
@@ -80,7 +72,9 @@ pub const BitCask = struct {
         @memcpy(keyvalbyts[8..(8 + key.len)], key);
         @memcpy(keyvalbyts[(8 + key.len)..(8 + key.len + value.len)], value);
 
-        // try self.keydir.put(key, .{ .value_len = value_len, .value_offset = 0 });
+        const file_offset = try self.file.getEndPos();
+
+        try self.keydir.put(key, .{ .value_offset = file_offset + 8 + key_len, .value_len = value_len });
         try self.file.writeAll(keyvalbyts);
     }
 
@@ -149,6 +143,7 @@ test "test_bitcask_multiple_put_get" {
 
 // https://github.com/oven-sh/bun/blob/3b7d1f7be28ecafabb8828d2d53f77898f45312f/src/open.zig#L437
 const string = []const u8;
+const smp_allocator = std.heap.smp_allocator;
 
 const std = @import("std");
 const HashMap = std.array_hash_map.StringArrayHashMap;

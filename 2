@@ -19,10 +19,6 @@ pub const KeyDirValue = struct {
     value_offset: u64,
 };
 
-const BitCaskError = error {
-    KeyNotFound,
-};
-
 // Simpler version of BitCask:
 // - No log files
 // - No multiple data files
@@ -53,21 +49,13 @@ pub const BitCask = struct {
     }
 
     pub fn get(self: *BitCask, key: []const u8) ![]u8 {
-        const keydirval_opt = self.keydir.get(key);
-        if(keydirval_opt == null) {
-            return BitCaskError.KeyNotFound;
-        }
-
-        const keydirval = keydirval_opt.?;
+        const keydirval = self.keydir.get(key) orelse unreachable;
 
         try self.file.seekTo(keydirval.value_offset);
 
-        if(keydirval.value_len == 0) {
-            return BitCaskError.KeyNotFound;
-        }
-
         const value = try self.allocator.alloc(u8, keydirval.value_len);
         _ = try self.file.read(value);
+
 
         return value;
     }
@@ -181,7 +169,7 @@ test "test_bitcask_delete" {
     var received_value_2 = try bitcask.get(key_2);
     try expect(std.mem.eql(u8, value_2, received_value_2));
 
-    const received_value_1 = try bitcask.get(key_1);
+    var received_value_1 = try bitcask.get(key_1);
     try expect(std.mem.eql(u8, value_1, received_value_1));
 
     try bitcask.delete(key_1);
@@ -189,7 +177,8 @@ test "test_bitcask_delete" {
     received_value_2 = try bitcask.get(key_2);
     try expect(std.mem.eql(u8, value_2, received_value_2));
 
-    try std.testing.expectError(BitCaskError.KeyNotFound, bitcask.get(key_1));
+    received_value_1 = try bitcask.get(key_1);
+    try expect(std.mem.eql(u8, value_1, received_value_1));
 
     try bitcask.close();
 }

@@ -14,7 +14,7 @@ const OpenOptions = struct {
 // ref: https://github.com/erikgrinaker/toydb/blob/main/docs/architecture/storage.md#bitcask-storage-engine
 // KeyValPair::key_len:u32, value_len: u32, key: []const u8, value: []const u8
 
-pub const KeyDirValue = struct {
+pub const ValueOffset = struct {
     value_len: u64,
     value_offset: u64,
 };
@@ -29,7 +29,7 @@ const BitCaskError = error {
 pub const BitCask = struct {
     file: fs.File,
     allocator: mem.Allocator = smp_allocator,
-    keydir: HashMap(KeyDirValue) = HashMap(KeyDirValue).init(smp_allocator),
+    keydir: HashMap(ValueOffset) = HashMap(ValueOffset).init(smp_allocator),
 
     pub fn open(dir_name: []const u8) !BitCask {
         // var gpa = heap.GeneralPurposeAllocator(.{}).init;
@@ -72,7 +72,7 @@ pub const BitCask = struct {
         return value;
     }
 
-    fn put_internal(self: *BitCask, key: []const u8, optional_value: ?[]const u8) !void {
+    fn put_internal(self: *BitCask, key: []const u8, optional_value: ?[]const u8) !ValueOffset {
         try self.file.seekFromEnd(0);
 
         var value_len: u32 = 0;
@@ -95,16 +95,19 @@ pub const BitCask = struct {
 
         const file_offset = try self.file.getEndPos();
 
-        try self.keydir.put(key, .{ .value_offset = file_offset + 8 + key_len, .value_len = value_len });
         try self.file.writeAll(keyvalbyts);
+
+        return .{ .value_offset = file_offset + 8 + key_len, .value_len = value_len };
     }
 
     pub fn put(self: *BitCask, key: []const u8, value: []const u8) !void {
-        try self.put_internal(key, value);
+        const value_offset = try self.put_internal(key, value);
+        try self.keydir.put(key, value_offset);
     }
 
     pub fn delete(self: *BitCask, key: []const u8) !void {
-        try self.put_internal(key, null);
+        _ = try self.put_internal(key, null);
+        _ = self.keydir.swapRemove(key);
     }
 
     pub fn list_keys(self: *BitCask) ![][]u8 {
@@ -112,14 +115,11 @@ pub const BitCask = struct {
         return [1][1]u8{[_]u8{'a'}};
     }
 
-    // pub fn fold(self: *BitCask) !void {
-    // }
-
+    // Only partial implementation as
+    // current impl only works on single
+    // file right now, so we just compact
+    // that
     pub fn merge(self: *BitCask) !void {
-        _ = self;
-    }
-
-    pub fn sync(self: *BitCask) !void {
         _ = self;
     }
 
@@ -127,6 +127,13 @@ pub const BitCask = struct {
         // _ = try self.allocator.deinit();
         self.file.close();
     }
+
+    // pub fn fold(self: *BitCask) !void {
+    // }
+
+    // pub fn sync(self: *BitCask) !void {
+    //     _ = self;
+    // }
 };
 
 test "test_bitcask_put_get" {
@@ -193,6 +200,11 @@ test "test_bitcask_delete" {
 
     try bitcask.close();
 }
+
+// TODO:
+// - build_keydir
+// - list_keys
+// - merge
 
 // https://github.com/oven-sh/bun/blob/3b7d1f7be28ecafabb8828d2d53f77898f45312f/src/open.zig#L437
 const string = []const u8;

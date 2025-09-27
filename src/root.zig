@@ -14,7 +14,7 @@ const OpenOptions = struct {
 // ref: https://github.com/erikgrinaker/toydb/blob/main/docs/architecture/storage.md#bitcask-storage-engine
 // KeyValPair::key_len:u32, value_len: u32, key: []const u8, value: []const u8
 
-pub const ValueOffset = struct {
+pub const ValueLocation = struct {
     value_len: u64,
     value_offset: u64,
 };
@@ -29,7 +29,7 @@ const BitCaskError = error {
 pub const BitCask = struct {
     file: fs.File,
     allocator: mem.Allocator = smp_allocator,
-    keydir: HashMap(ValueOffset) = HashMap(ValueOffset).init(smp_allocator),
+    keydir: HashMap(ValueLocation) = HashMap(ValueLocation).init(smp_allocator),
 
     pub fn open(dir_name: []const u8) !BitCask {
         // var gpa = heap.GeneralPurposeAllocator(.{}).init;
@@ -72,7 +72,7 @@ pub const BitCask = struct {
         return value;
     }
 
-    fn put_internal(self: *BitCask, key: []const u8, optional_value: ?[]const u8) !ValueOffset {
+    fn put_internal(self: *BitCask, key: []const u8, optional_value: ?[]const u8) !ValueLocation {
         try self.file.seekFromEnd(0);
 
         var value_len: u32 = 0;

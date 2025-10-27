@@ -24,6 +24,13 @@ const BitCaskError = error {
     KeyNotFound,
 };
 
+const BitCaskIterator = struct {
+    fn next(self: *BitCaskIterator) ?u8 {
+        _ = self;
+        return null;
+    }
+};
+
 // Simpler version of BitCask:
 // - No log files
 // - No multiple data files
@@ -189,11 +196,23 @@ pub const BitCask = struct {
         return try self.allocator.dupe([]const u8, self.keydir.keys());
     }
 
+    pub fn iterator(self: *BitCask) BitCaskIterator {
+        _ = self;
+        return BitCaskIterator {};
+        // return self.keydir.iterator();
+    }
+
     // Only partial implementation as
     // current impl only works on single
     // file right now, so we just compact
     // that
     pub fn merge(self: *BitCask) !void {
+        // - create a temp file for new data
+        // - create an iterator over keydir,
+        // get all values and write them to
+        // new datafile
+        // - replace new data file with old
+        // data file
         _ = self;
     }
 
@@ -356,9 +375,29 @@ test "test_bitcask_list_keys" {
     try bitcask.close();
 }
 
+test "test_bitcask_iterator" {
+    var bitcask = try BitCask.open("./data");
+
+    const key_1: string = "melody";
+    const value_1: string = "itni choclaty kyun hai";
+
+    try bitcask.put(key_1, value_1);
+
+    const itr = bitcask.iterator();
+
+    for (itr.next()) |entry| {
+        _ = entry;
+        // const key = *(entry.key_ptr);
+        // std.debug.print("key::{}\n", .{key});
+        // const va = *(itr.key_ptr);
+    }
+
+    try bitcask.close();
+}
+
 // TODO:
-// - merge
 // - iterator
+// - merge
 
 // https://github.com/oven-sh/bun/blob/3b7d1f7be28ecafabb8828d2d53f77898f45312f/src/open.zig#L437
 const string = []const u8;

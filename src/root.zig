@@ -182,9 +182,11 @@ pub const BitCask = struct {
         _ = self.keydir.swapRemove(key);
     }
 
-    pub fn list_keys(self: *BitCask) ![][]u8 {
-        _ = self;
-        return [1][1]u8{[_]u8{'a'}};
+    pub fn list_keys(self: *BitCask) ![][]const u8 {
+        // As this returns the underlying array
+        // used by keydir, we will need to clone
+        // it
+        return try self.allocator.dupe([]const u8, self.keydir.keys());
     }
 
     // Only partial implementation as
@@ -333,9 +335,28 @@ test "test_bitcask_corrupt_file_build_keydir" {
     try bitcask_1.close();
 }
 
+test "test_bitcask_list_keys" {
+    var bitcask = try BitCask.open("./data");
+
+    const key_1: string = "melody";
+    const value_1: string = "itni choclaty kyun hai";
+
+    try bitcask.put(key_1, value_1);
+
+    const key_2: string = "AJR";
+    const value_2: string = "Turning out";
+
+    try bitcask.put(key_2, value_2);
+
+    const keys = try bitcask.list_keys();
+
+    try expect(std.mem.eql(u8, keys[0], key_1));
+    try expect(std.mem.eql(u8, keys[1], key_2));
+
+    try bitcask.close();
+}
+
 // TODO:
-// - build_keydir
-// - list_keys
 // - merge
 // - iterator
 

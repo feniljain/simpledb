@@ -55,7 +55,6 @@ pub const BitCask = struct {
                 break :blk file;
             };
 
-
         var bc = BitCask{ .file = file };
 
         if(!new_file_created) {
@@ -72,7 +71,11 @@ pub const BitCask = struct {
         try self.file.seekTo(curr_pos);
         const lenbyts = try self.allocator.alloc(u8, 4);
 
-        while(curr_pos < file_len) {
+        var is_file_corrupted = false;
+
+        // make sure we can at least read key_len
+        // and value_len
+        while((curr_pos + 8) < file_len) {
             _ = try self.file.read(lenbyts);
             const key_len = mem.readInt(u32, lenbyts[0..4], Endian.big);
             curr_pos += 4;
@@ -80,6 +83,14 @@ pub const BitCask = struct {
             _ = try self.file.read(lenbyts);
             const value_len = mem.readInt(u32, lenbyts[0..4], Endian.big);
             curr_pos += 4;
+
+            if(curr_pos + key_len > file_len) {
+                is_file_corrupted = true;
+                // this entry is corrupted, remove
+                // key_len and value_len of this entry
+                curr_pos -= 8;
+                break;
+            }
 
             const key = try self.allocator.alloc(u8, key_len);
             _ = try self.file.readAll(key);
@@ -90,14 +101,22 @@ pub const BitCask = struct {
                 // insert into keydir
                 try self.keydir.put(key, .{ .value_offset = curr_pos, .value_len = value_len });
 
+                if(curr_pos + value_len > file_len) {
+                    is_file_corrupted = true;
+                    // this entry is corrupted, remove
+                    // key_len, value_len and key of
+                    // this entry
+                    curr_pos -= (8 + key_len);
+                    break;
+                }
+
                 // skip reading value
                 curr_pos += value_len;
                 _ = try self.file.seekTo(curr_pos);
             }
         }
 
-        assert(curr_pos <= file_len);
-        if(curr_pos != file_len) {
+        if(is_file_corrupted or curr_pos != file_len) {
             // if current_position is not perfectly as file_len
             // that means corruption has happened,
             // truncate remaining file
@@ -275,33 +294,44 @@ test "test_bitcask_build_keydir" {
     try bitcask_1.close();
 }
 
-// // TODO(test): corrupt file
-// test "test_bitcask_build_keydir_corrupt_file" {
-//     var bitcask = try BitCask.open("./data");
-//
-//     const key_1: string = "melody";
-//     const value_1: string = "itni choclaty kyun hai";
-//
-//     try bitcask.put(key_1, value_1);
-//
-//     const received_value_1 = try bitcask.get(key_1);
-//     try expect(std.mem.eql(u8, value_1, received_value_1));
-//
-//     // corrupt the file by writing just key_len
-//     const lenbyts = try bitcask.allocator.alloc(u8, 4);
-//     mem.writeInt(u32, lenbyts[0..4], 10, Endian.big);
-//     try bitcask.file.writeAll(lenbyts);
-//
-//     try bitcask.close();
-//
-//     var bitcask_1 = try BitCask.open("./data");
-//
-//     const received_value_2 = try bitcask_1.get(key_1);
-//     try expect(std.mem.eql(u8, value_1, received_value_2));
-//
-//
-//     try bitcask_1.close();
-// }
+test "test_bitcask_corrupt_file_build_keydir" {
+    var bitcask = try BitCask.open("./data");
+
+    const key_1: string = "melody";
+    const value_1: string = "itni choclaty kyun hai";
+
+    try bitcask.put(key_1, value_1);
+
+    const received_value_1 = try bitcask.get(key_1);
+    try expect(std.mem.eql(u8, value_1, received_value_1));
+
+    const uncorrupted_file_len = try bitcask.file.getEndPos();
+
+    const lenbyts = try bitcask.allocator.alloc(u8, 4);
+    mem.writeInt(u32, lenbyts[0..4], 10, Endian.big); // write key_len
+    try bitcask.file.writeAll(lenbyts);
+
+    mem.writeInt(u32, lenbyts[0..4], 10, Endian.big); // write value_len
+    try bitcask.file.writeAll(lenbyts);
+
+    // write bogus smaller than key_len key data,
+    // indicating corruption
+    mem.writeInt(u32, lenbyts[0..4], 10, Endian.big);
+    try bitcask.file.writeAll(lenbyts);
+
+    try bitcask.close();
+
+    var bitcask_1 = try BitCask.open("./data");
+
+    const received_value_2 = try bitcask_1.get(key_1);
+    try expect(std.mem.eql(u8, value_1, received_value_2));
+
+    const new_file_len = try bitcask_1.file.getEndPos();
+    // make sure file did get truncated
+    try expect(uncorrupted_file_len == new_file_len);
+
+    try bitcask_1.close();
+}
 
 // TODO:
 // - build_keydir

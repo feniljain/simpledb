@@ -72,31 +72,18 @@ pub const BitCask = struct {
         try self.file.seekTo(curr_pos);
         const lenbyts = try self.allocator.alloc(u8, 4);
 
-        std.debug.print("DEBUG::curr_pos::{d} - file_len::{d}\n", .{curr_pos, file_len});
-
-        // TODO
-        const is_file_corrupted: bool = false;
-
-        // FIX: set is_file_corrupted instead of
-        // returning from method
         while(curr_pos < file_len) {
             _ = try self.file.read(lenbyts);
             const key_len = mem.readInt(u32, lenbyts[0..4], Endian.big);
             curr_pos += 4;
 
-            std.debug.print("DEBUG::key_len::{d}\n", .{key_len});
-
-            const key = try self.allocator.alloc(u8, key_len);
-            _ = try self.file.read(key);
-            curr_pos += key_len;
-
-            std.debug.print("DEBUG::key::{s}\n", .{key});
-
             _ = try self.file.read(lenbyts);
             const value_len = mem.readInt(u32, lenbyts[0..4], Endian.big);
             curr_pos += 4;
 
-            std.debug.print("DEBUG::value_len::{d}\n", .{value_len});
+            const key = try self.allocator.alloc(u8, key_len);
+            _ = try self.file.readAll(key);
+            curr_pos += key_len;
 
             // don't read tombstone
             if(value_len != 0) {
@@ -109,14 +96,12 @@ pub const BitCask = struct {
             }
         }
 
-        std.debug.print("DEBUG::curr_pos::{d} - file_len::{d}\n", .{curr_pos, file_len});
         assert(curr_pos <= file_len);
-        if(is_file_corrupted or curr_pos != file_len) {
+        if(curr_pos != file_len) {
             // if current_position is not perfectly as file_len
             // that means corruption has happened,
             // truncate remaining file
             try self.file.setEndPos(curr_pos);
-            std.debug.print("DEBUG::corrupted file, truncating", .{});
         }
     }
 
@@ -148,24 +133,24 @@ pub const BitCask = struct {
             const value = optional_value.?;
             value_len = @intCast(value.len);
         }
-        const key_len: u64 = @intCast(key.len);
+        const key_len: u32 = @intCast(key.len);
 
         var keyvalbyts = try self.allocator.alloc(u8, 4 + 4 + key_len + value_len);
 
-        mem.writeInt(u32, keyvalbyts[0..4], @intCast(key.len), Endian.big);
-        @memcpy(keyvalbyts[8..(8 + key.len)], key);
+        mem.writeInt(u32, keyvalbyts[0..4], key_len, Endian.big);
+        @memcpy(keyvalbyts[8..(8 + key_len)], key);
 
         mem.writeInt(u32, keyvalbyts[4..8], value_len, Endian.big);
         if(optional_value != null) {
             const value = optional_value.?;
-            @memcpy(keyvalbyts[(8 + key.len)..(8 + key.len + value.len)], value);
+            @memcpy(keyvalbyts[(8 + key_len)..(8 + key_len + value_len)], value);
         }
 
         const file_offset = try self.file.getEndPos();
 
         try self.file.writeAll(keyvalbyts);
 
-        return .{ .value_offset = file_offset + 8 + key_len, .value_len = value_len };
+        return .{ .value_offset = file_offset + 8 + @as(u64, key_len), .value_len = value_len };
     }
 
     pub fn put(self: *BitCask, key: []const u8, value: []const u8) !void {

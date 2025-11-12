@@ -24,20 +24,13 @@ const BitCaskError = error {
     KeyNotFound,
 };
 
-const BitCaskIterator = struct {
-    fn next(self: *BitCaskIterator) ?u8 {
-        _ = self;
-        return null;
-    }
-};
-
 // Simpler version of BitCask:
 // - No log files
 // - No multiple data files
 pub const BitCask = struct {
     file: fs.File,
     allocator: mem.Allocator = smp_allocator,
-    keydir: HashMap(ValueLocation) = HashMap(ValueLocation).init(smp_allocator),
+    keydir: StringHashMap(ValueLocation) = StringHashMap(ValueLocation).init(smp_allocator),
 
     pub fn open(dir_name: []const u8) !BitCask {
         // var gpa = heap.GeneralPurposeAllocator(.{}).init;
@@ -194,12 +187,6 @@ pub const BitCask = struct {
         // used by keydir, we will need to clone
         // it
         return try self.allocator.dupe([]const u8, self.keydir.keys());
-    }
-
-    pub fn iterator(self: *BitCask) BitCaskIterator {
-        _ = self;
-        return BitCaskIterator {};
-        // return self.keydir.iterator();
     }
 
     // Only partial implementation as
@@ -383,20 +370,20 @@ test "test_bitcask_iterator" {
 
     try bitcask.put(key_1, value_1);
 
-    const itr = bitcask.iterator();
+    var itr = bitcask.keydir.iterator();
 
-    for (itr.next()) |entry| {
-        _ = entry;
-        // const key = *(entry.key_ptr);
-        // std.debug.print("key::{}\n", .{key});
-        // const va = *(itr.key_ptr);
-    }
+    // while (itr.next()) |entry| {}
+
+    const entry = itr.next().?;
+    const key = entry.key_ptr.*;
+    // const val = entry.value_ptr.*;
+
+    try expect(std.mem.eql(u8, key, key_1));
 
     try bitcask.close();
 }
 
 // TODO:
-// - iterator
 // - merge
 
 // https://github.com/oven-sh/bun/blob/3b7d1f7be28ecafabb8828d2d53f77898f45312f/src/open.zig#L437
@@ -405,7 +392,7 @@ const smp_allocator = std.heap.smp_allocator;
 
 const std = @import("std");
 const assert = std.debug.assert;
-const HashMap = std.array_hash_map.StringArrayHashMap;
+const StringHashMap = std.array_hash_map.StringArrayHashMap;
 const Endian = std.builtin.Endian;
 const heap = std.heap;
 const mem = std.mem;

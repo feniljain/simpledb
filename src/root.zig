@@ -383,6 +383,58 @@ test "test_bitcask_iterator" {
     try bitcask.close();
 }
 
+test "test_bitcask_merge" {
+    var bitcask = try BitCask.open("./data");
+
+    const key_1: string = "melody";
+    const value_1: string = "itni choclaty kyun hai";
+
+    try bitcask.put(key_1, value_1);
+
+    const key_2: string = "AJR";
+    const value_2: string = "Turning out";
+
+    try bitcask.put(key_2, value_2);
+
+    // // get value from keydir
+    // // before deleting
+    // var valloc: ?ValueLocation = null;
+    // var itr = bitcask.keydir.iterator();
+    // while (itr.next()) |entry| {
+    //     const key = entry.key_ptr.*;
+    //     if(mem.eql(u8, key, key_1)) {
+    //         valloc = entry.value_ptr.*;
+    //         break;
+    //     }
+    // }
+
+    const file_len_before_merge = try self.file.getEndPos();
+
+    try bitcask.delete(key_1);
+
+    // try bitcask.file.seekTo(valloc.?.value_offset - key_1.len - 4); 
+    //
+    // // read value_length from file for the given key
+    // const lenbyts = try bitcask.allocator.alloc(u8, 4);
+    // _ = try bitcask.file.readAll(lenbyts);
+    // var value_len = mem.readInt(u32, lenbyts[0..4], Endian.big);
+    //
+    // std.debug.print("DEBUG::value_len::{}\n", .{value_len});
+
+    // // check earlier stored valuelocation
+    // // has value_len as 0
+    // try expect(value_len == 0);
+
+    try bitcask.merge();
+
+    const file_len_after_merge = try self.file.getEndPos();
+
+    // compare file length, it should be lesser
+    try expect(file_len_before_merge > file_len_after_merge);
+
+    try bitcask.close();
+}
+
 // TODO:
 // - merge
 

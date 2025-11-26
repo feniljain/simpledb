@@ -31,6 +31,7 @@ pub const BitCask = struct {
     file: fs.File,
     allocator: mem.Allocator = smp_allocator,
     keydir: StringHashMap(ValueLocation) = StringHashMap(ValueLocation).init(smp_allocator),
+    dir_name: []const u8,
 
     pub fn open(dir_name: []const u8) !BitCask {
         // var gpa = heap.GeneralPurposeAllocator(.{}).init;
@@ -38,11 +39,15 @@ pub const BitCask = struct {
 
         // const allocator = std.testing.allocator;
 
-        var dir = try fs.cwd().openDir(dir_name, .{ .access_sub_paths = true, .iterate = true, .no_follow = false });
-        defer dir.close();
-
         const file_name = try std.fmt.allocPrint(smp_allocator, "data-{d}", .{1});
         defer smp_allocator.free(file_name);
+
+        return try BitCask.openWithFile(dir_name, file_name);
+    }
+
+    pub fn openWithFile(dir_name: []const u8, file_name: []const u8) !BitCask {
+        var dir = try fs.cwd().openDir(dir_name, .{ .access_sub_paths = true, .iterate = true, .no_follow = false });
+        defer dir.close();
 
         var new_file_created = false;
 
@@ -55,7 +60,8 @@ pub const BitCask = struct {
                 break :blk file;
             };
 
-        var bc = BitCask{ .file = file };
+
+        var bc = BitCask { .file = file, .dir_name = dir_name };
 
         if(!new_file_created) {
             try bc.build_keydir();
@@ -193,14 +199,33 @@ pub const BitCask = struct {
     // current impl only works on single
     // file right now, so we just compact
     // that
-    pub fn merge(self: *BitCask) !void {
-        // - create a temp file for new data
-        // - create an iterator over keydir,
+    pub fn merge(old_bitcask: *BitCask) !BitCask {
+        // create a temp file for new data
+        const temp_data_file_name = try std.fmt.allocPrint(smp_allocator, "data-{d}-temp", .{1});
+        const data_file_name = try std.fmt.allocPrint(smp_allocator, "data-{d}", .{1});
+
+        // create new bitcask instance with this temp file
+        var new_bitcask = try BitCask.openWithFile(old_bitcask.dir_name, temp_data_file_name);
+
+        // create an iterator over keydir,
         // get all values and write them to
         // new datafile
-        // - replace new data file with old
-        // data file
-        _ = self;
+        var itr = old_bitcask.keydir.iterator();
+        while (itr.next()) |entry| {
+            const key = entry.key_ptr.*;
+            const value = try old_bitcask.get(key);
+
+            try new_bitcask.put(key, value);
+        }
+
+        try old_bitcask.close();
+
+        var dir = try fs.cwd().openDir(old_bitcask.dir_name, .{ .access_sub_paths = true, .iterate = true, .no_follow = false });
+        defer dir.close();
+
+        try dir.rename(temp_data_file_name, data_file_name);
+        
+        return new_bitcask;
     }
 
     pub fn close(self: *BitCask) !void {
@@ -396,47 +421,20 @@ test "test_bitcask_merge" {
 
     try bitcask.put(key_2, value_2);
 
-    // // get value from keydir
-    // // before deleting
-    // var valloc: ?ValueLocation = null;
-    // var itr = bitcask.keydir.iterator();
-    // while (itr.next()) |entry| {
-    //     const key = entry.key_ptr.*;
-    //     if(mem.eql(u8, key, key_1)) {
-    //         valloc = entry.value_ptr.*;
-    //         break;
-    //     }
-    // }
-
-    const file_len_before_merge = try self.file.getEndPos();
+    const file_len_before_merge = try bitcask.file.getEndPos();
 
     try bitcask.delete(key_1);
 
-    // try bitcask.file.seekTo(valloc.?.value_offset - key_1.len - 4); 
-    //
-    // // read value_length from file for the given key
-    // const lenbyts = try bitcask.allocator.alloc(u8, 4);
-    // _ = try bitcask.file.readAll(lenbyts);
-    // var value_len = mem.readInt(u32, lenbyts[0..4], Endian.big);
-    //
-    // std.debug.print("DEBUG::value_len::{}\n", .{value_len});
+    var new_bitcask = try bitcask.merge();
 
-    // // check earlier stored valuelocation
-    // // has value_len as 0
-    // try expect(value_len == 0);
+    const file_len_after_merge = try new_bitcask.file.getEndPos();
 
-    try bitcask.merge();
+    // file len after merge should exactly be a (key len + value len + 2 * len bytes i.e. 4)
+    // lesser than before merge
+    try expect(file_len_before_merge == (file_len_after_merge + key_1.len + value_1.len + 4 + 4));
 
-    const file_len_after_merge = try self.file.getEndPos();
-
-    // compare file length, it should be lesser
-    try expect(file_len_before_merge > file_len_after_merge);
-
-    try bitcask.close();
+    try new_bitcask.close();
 }
-
-// TODO:
-// - merge
 
 // https://github.com/oven-sh/bun/blob/3b7d1f7be28ecafabb8828d2d53f77898f45312f/src/open.zig#L437
 const string = []const u8;
